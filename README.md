@@ -281,20 +281,6 @@ No duplicates on the server (prints nothing):
 sqlite3 server.db "SELECT event_id, COUNT(*) FROM records GROUP BY event_id HAVING COUNT(*) > 1;"
 ```
 
-## Trade-offs and limitations
-
-- **First write wins on duplicates.** A resend with the same `event_id` but different content is reported as `duplicate` and the new content is silently dropped. No conflict detection is done.
-- **Server `/stats` is in memory.** It resets on restart and exists for observability and tests.
-- **Server `(device_id, sequence)` index is not unique**, as specified. If a device DB is wiped, its sequence restarts at 1 and collides in ordering. `after_sequence` paging assumes unique sequences per device.
-- **One agent per device DB.** Two agents on the same file would fight over sequence numbers; the unique index stops them from corrupting data, but the second would keep failing inserts.
-- **Missed ticks are skipped.** If the generator stalls, for example on a long DB lock, it skips missed ticks instead of bursting fake catch-up records.
-- **`received_at` is per batch.** All records in one request share the same timestamp.
-- **Device clock is trusted.** There is no clock-skew detection between `measured_at` and `received_at`.
-- **The config loader is duplicated** in `device_agent/config.py` and `server/config.py`. This is deliberate: the two programs share no code, so either can be deployed alone.
-- **No authentication or TLS.** Any client can post for any `device_id`.
-- **No server-side batch size limit** and no request body size limit.
-- **SYNCED rows are kept forever** on the device; the DB grows without bound.
-
 ## Unfinished work / future improvements
 
 - Store the rejection reason and a `rejected_at` on the device row instead of only logging it.
