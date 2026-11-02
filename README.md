@@ -35,7 +35,7 @@ All data is synthetic. No real patient data is used.
 - Every record is committed to `device.db` before any network attempt is made.
 - The two agent threads share nothing but the SQLite file. The generator never touches the network and never waits for the sync thread.
 
-## Technology choices
+## Tech stack
 
 | Choice | Why |
 |---|---|
@@ -228,13 +228,7 @@ That shows three screens: server `DOWN` with records piling up as PENDING and TR
 - a table of per-record batch results, with `stored`, `duplicate` or `rejected` and the exact error;
 - the server's stored records in order, with `... missing sequence 3 ...` wherever a number is absent.
 
-Use `-rP` instead of `-s` to print the same tables after each test finishes, rather than live.
-
-Raw agent and server logs are printed automatically when a test fails. To see them for passing tests too, add `--show-logs`. For example, `python -m pytest tests/test_7_batch_size.py -rP --show-logs` also shows the three `batch: size=50 / 50 / 20` lines.
-
-Note: the generator produces its first record one `interval` after start-up. The tests rely on this: running the agent with `"interval": 3600` in its config flushes an existing backlog without adding records.
-
-### Testing by hand
+### Testing Manually
 
 Start the server, the agent and `python monitor.py` in three terminals, then follow these steps in order.
 
@@ -290,7 +284,6 @@ sqlite3 server.db "SELECT event_id, COUNT(*) FROM records GROUP BY event_id HAVI
 ## Trade-offs and limitations
 
 - **First write wins on duplicates.** A resend with the same `event_id` but different content is reported as `duplicate` and the new content is silently dropped. No conflict detection is done.
-- **Rejected reasons are only logged** on the device. The device table has no error column.
 - **Server `/stats` is in memory.** It resets on restart and exists for observability and tests.
 - **Server `(device_id, sequence)` index is not unique**, as specified. If a device DB is wiped, its sequence restarts at 1 and collides in ordering. `after_sequence` paging assumes unique sequences per device.
 - **One agent per device DB.** Two agents on the same file would fight over sequence numbers; the unique index stops them from corrupting data, but the second would keep failing inserts.
@@ -307,21 +300,8 @@ sqlite3 server.db "SELECT event_id, COUNT(*) FROM records GROUP BY event_id HAVI
 - Store the rejection reason and a `rejected_at` on the device row instead of only logging it.
 - Retention: purge or archive SYNCED rows older than N days on the device.
 - Detect conflicting duplicates by storing a content hash and returning `conflict` when it differs.
-- Authentication (API key or mTLS per device) and HTTPS.
-- Enforce a maximum batch size on the server and return `413` above it.
 - Real fault-injection tests: a server that delays its response past `request_timeout` after committing (a true lost response), and a server that returns 5xx. Today these paths are covered by design and by the simulated lost-response test, not by injected network faults.
 - Unit tests for the backoff calculation and for config-file validation (missing, unknown and mistyped keys).
 - A gap-report endpoint per device, and Prometheus metrics instead of `/stats`.
 - Schema migrations, packaging (`pyproject.toml` with console scripts), a Dockerfile and CI.
 
-### Scaling plan (pending)
-
-These are not built yet. They are the next steps when the system grows beyond one server and a handful of devices.
-
-- **Move the server database to PostgreSQL.** SQLite allows only one writer at a time and lives in a single file on one machine. Switch when many devices write at once, when more than one server instance is needed, or when replication, failover and point-in-time backups are required. Only `server/db.py` changes: `INSERT ... ON CONFLICT (event_id) DO NOTHING` works the same in PostgreSQL. The device keeps SQLite, which is the right tool for an embedded local store.
-- **Smarter reconnection.** Today the device finds out the server is back on its next retry, which happens at most about 60 s (±20%) apart. Possible improvements:
-  - after a long outage, send a small probe batch first and only then full batches;
-  - honour a `Retry-After` header when the server returns 503 for maintenance;
-  - wake the sync thread as soon as a record is saved, instead of polling the local DB every second.
-- **Faster drain of large backlogs.** Use a larger batch size while a backlog exists, and gzip the request body.
-- **Message broker for a large fleet.** When thousands of devices reconnect at once after a long outage, they all hit the server and database together. The fix is to put a broker in between: devices publish over MQTT, the messages land in Kafka partitioned by `device_id` (which keeps each device's order), and consumers write to PostgreSQL at their own pace. Each device still keeps its local SQLite outbox, because a broker cannot help when the device's own network is down. Consumers still deduplicate on `event_id`, because brokers deliver at least once.
