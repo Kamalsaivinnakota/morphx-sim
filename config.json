@@ -1,0 +1,17 @@
+{
+  "device": {
+    "device_id": "MORPHX_SIM_001",
+    "interval": 5,
+    "server_url": "http://127.0.0.1:8000",
+    "batch_size": 50,
+    "db_path": "device.db",
+    "request_timeout": 5,
+    "backoff_min": 1,
+    "backoff_max": 60
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8000,
+    "db_path": "server.db"
+  }
+}
